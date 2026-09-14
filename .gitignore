@@ -1,0 +1,12 @@
+# 环境与密钥
+.env
+
+# 运行产物
+reports/
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

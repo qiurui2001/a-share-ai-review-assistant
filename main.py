@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+"""
+main.py —— 每日盘后复盘 Agent 入口
+====================================
+
+编排 researcher → analyzer → writer 三个 Agent 串行协作，一键产出复盘报告并邮件交付。
+
+用法：
+    python main.py                         # 复盘今天（或最近交易日）
+    python main.py --date 2026-09-11       # 指定日期
+    python main.py --to client@qq.com      # 指定收件邮箱
+    python main.py --quiet                 # 关闭过程日志
+
+环境变量：见 .env.example
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from datetime import datetime
+
+from dotenv import load_dotenv
+
+# 先加载 .env，且不覆盖已有的系统环境变量（命令行参数优先级更高）
+load_dotenv()
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="每日盘后复盘 Multi-Agent")
+    parser.add_argument("--date", default="", help="复盘日期，格式 YYYY-MM-DD，默认今天")
+    parser.add_argument("--to", default="", help="收件邮箱，覆盖 REPORT_TO_EMAIL")
+    parser.add_argument("--quiet", action="store_true", help="关闭详细过程日志")
+    return parser.parse_args()
+
+
+def _build_crew():
+    # 延迟导入：确保命令行注入的环境变量在 Agent / LLM 初始化前生效
+    from crewai import Crew, Process
+
+    from agents import AGENTS
+    from tasks import TASKS
+
+    return Crew(
+        agents=AGENTS,
+        tasks=TASKS,
+        process=Process.sequential,
+        verbose=not os.environ.get("AGENT_VERBOSE", "true").lower() in ("0", "false", "no"),
+        memory=False,          # 复盘任务上下文清晰，无需向量记忆，避免额外依赖
+        max_rpm=30,            # 控制请求频率，规避接口限流
+    )
+
+
+def main() -> int:
+    args = _parse_args()
+
+    if args.to:
+        os.environ["REPORT_TO_EMAIL"] = args.to
+    if args.quiet:
+        os.environ["AGENT_VERBOSE"] = "false"
+
+    today = args.date.strip() or datetime.now().strftime("%Y-%m-%d")
+
+    # 延迟导入以读取最终环境变量
+    from agents import AGENTS, DEEPSEEK_API_KEY  # noqa: F401
+    from tasks import TASKS  # noqa: F401
+
+    if not DEEPSEEK_API_KEY:
+        print("=" * 60)
+        print("  [ERROR] 未检测到 DEEPSEEK_API_KEY")
+        print("  请复制 .env.example 为 .env 并填写，或设置系统环境变量")
+        print("=" * 60)
+        return 1
+
+    crew = _build_crew()
+
+    print("=" * 60)
+    print(f"  每日盘后复盘 Agent 启动")
+    print(f"  复盘日期：{today}")
+    print(f"  团队：研究员 → 核查员 → 分析师 → 撰稿人")
+    print(f"  收件邮箱：{os.environ.get('REPORT_TO_EMAIL', '（未配置，将只存档）')}")
+    print("=" * 60)
+
+    try:
+        result = crew.kickoff(inputs={"today": today})
+    except KeyboardInterrupt:
+        print("\n[已中断] 用户取消运行。")
+        return 130
+    except Exception as exc:  # noqa: BLE001
+        print(f"\n[运行失败] {exc}")
+        return 1
+
+    print("\n" + "=" * 60)
+    print("  复盘完成")
+    print("=" * 60)
+    print(result)
+
+    usage = getattr(crew, "usage_metrics", None)
+    if usage:
+        print("\n[Token 用量] " + str(usage))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
