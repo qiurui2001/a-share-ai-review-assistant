@@ -24,6 +24,7 @@ from crewai import Agent, LLM
 from dotenv import load_dotenv
 
 from rag import retrieve_past_predictions
+from ledger import get_prediction_stats
 from tools import (
     fetch_webpage,
     generate_index_charts,
@@ -196,6 +197,7 @@ review_validator = Agent(
     ),
     tools=[
         retrieve_past_predictions,
+        get_prediction_stats,
         get_market_overview,
         get_index_kline,
         get_limit_pool,
