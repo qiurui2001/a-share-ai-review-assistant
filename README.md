@@ -9,9 +9,10 @@
 
 ## 1. 功能特性
 
-- **多 Agent 流水线**：研究员 → 事实核查员 → 复盘校验员 → 盘面分析师 → 专业投资顾问，各司其职、上下文隔离。
+- **多 Agent 流水线**：研究员 → 事实核查员 → 复盘校验员 → 盘面分析师 → **模拟交易员** → 专业投资顾问，各司其职、上下文隔离。
 - **防幻觉设计**：独立「事实核查员」在分析前重新取数、逐项交叉验证，输出差异清单与修正后情报。
 - **往期预测验证（RAG）**：检索历史复盘里「对未来的预测」，与今日真实走势逐条比对，形成「预测 → 验证 → 纠偏」闭环。
+- **模拟交易**：内置 **10 万元**模拟盘，复盘时按**收盘价**自动买卖个股/ETF，输出「交易流水 + 持仓盈亏」表格（**不发邮件**）。
 - **真实数据源**：腾讯行情、东方财富（延时/涨跌停/快讯）、必应搜索，全部免费公开接口。
 - **可视化报告**：自动生成近三个月指数 K 线图（蜡烛图 + 均线 + 成交量），内嵌进报告与邮件。
 - **规范化表格**：指数表、行业/概念板块的涨/跌/资金四榜均为规范 Markdown 表格，邮件内渲染为 HTML 表格。
@@ -25,12 +26,8 @@
 ### 2.1 Agent 流水线
 
 ```
-┌─────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────┐
-│  研究员     │ → │  事实核查员  │ → │  复盘校验员  │ → │  盘面分析师  │ → │  专业投资顾问│ → │  交付    │
-│ researcher  │   │ fact_checker │   │review_valid. │   │  analyzer    │   │  writer      │   │ deliver  │
-│ 温度 0.8    │   │ 温度 0.3     │   │ 温度 0.3(RAG)│   │ 温度 0.8     │   │ 温度 0.8     │   │          │
-└─────────────┘   └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘   └──────────┘
-   收集情报          独立复核/修正     检索往期预测并验证    量价/技术/情绪      撰写+配图       存档+发邮件
+研究员(0.8) → 核查员(0.3) → 复盘校验员(0.3) → 分析师(0.8) → 模拟交易员(0.8) → 撰稿人(0.8) → 交付
+  收集情报      独立复核/防幻觉   检索往期预测+命中率    量价/技术/情绪   10w模拟盘收盘交易   撰写+配图   存档+发邮件
 ```
 
 ### 2.2 任务链（CrewAI `Process.sequential`）
@@ -41,11 +38,12 @@
 | `fact_check_task` | 事实核查员 | 只审研究员输出，重取数据交叉验证 | `outputs/01b_factcheck_{date}.md` |
 | `review_task` | 复盘校验员 | **RAG 检索往期预测**，与今日走势逐条验证 | `outputs/01c_review_{date}.md` |
 | `analyzer_task` | 盘面分析师 | 基于修正情报 + 往期校准做深度分析 | `outputs/02_analysis_{date}.md` |
+| `paper_trade_task` | 模拟交易员 | **10w 模拟盘收盘交易**，输出交易表（不发邮件） | `paper/交易_{date}.md` |
 | `writer_task` | 撰稿人 | 撰写最终报告并插入 K 线图 | `outputs/03_report_{date}.md` |
 | `deliver_task` | 撰稿人 | 存档 + 发送邮件（独立任务确保执行） | `outputs/04_delivery_{date}.md` |
 
 - 下游任务通过 CrewAI 的 `context` 获取上游任务输出；写作与交付分离，避免「只写不交」。
-- 最终报告同时归档到 `reports/每日复盘_{date}.md`，K 线图在 `reports/charts/`。
+- 最终报告同时归档到 `reports/每日复盘_{date}.md`，K 线图在 `reports/charts/`；模拟交易在 `paper/`。
 
 ---
 
@@ -54,14 +52,15 @@
 ```
 每日复盘agent/
 ├── main.py                       # 入口：CLI 参数、组装 Crew、kickoff
-├── agents.py                     # 4 个 Agent + LLM 配置 + 空响应重试
-├── tasks.py                      # 6 个串行任务
+├── agents.py                     # 6 个 Agent + LLM 配置 + 空响应重试
+├── tasks.py                      # 7 个串行任务
 ├── tools.py                      # 12 个工具 + 数据源解析 + 邮件渲染
 ├── rag.py                        # 往期复盘检索（轻量 RAG：TF-IDF + 时间衰减 + 预测偏置）
 ├── ledger.py                     # 预测命中率滚动统计（确定性解析历史验证表）
+├── paper.py                      # 模拟交易账户（10w 本金、收盘成交、状态持久化 + 表格输出）
 ├── requirements.txt
 ├── .env.example                  # 环境变量模板（复制为 .env）
-├── .gitignore                    # 排除 .env / reports / outputs
+├── .gitignore                    # 排除 .env / reports / outputs / paper
 ├── BUGFIX-LLM空响应重试.md        # 一次线上问题的复盘记录
 ├── reports/                      # 归档报告与图表（git 忽略）
 └── outputs/                      # 各阶段中间产物（git 忽略）
@@ -122,9 +121,10 @@ python main.py --quiet                  # 关闭过程日志
 | `DEEPSEEK_BASE_URL` | | `https://api.deepseek.com/v1` | OpenAI 兼容地址 |
 | `DEEPSEEK_MODEL` | | `deepseek-v4-flash` | 模型名（内部加 `deepseek/` 前缀走原生 provider） |
 | `LLM_TEMPERATURE` | | `0.8` | 创作类 Agent 温度 |
-| `LLM_MAX_TOKENS` | | `8192` | 单次输出上限 |
+| `LLM_MAX_TOKENS` | | `16384` | 单次输出上限 |
 | `LLM_EMPTY_RETRY` | | `3` | LLM 空响应最大重试次数 |
 | `LLM_RETRY_DELAY` | | `2` | 空响应退避基数（秒，线性退避） |
+| `SECTOR_CACHE_TTL` | | `600` | 板块资金接口进程内缓存（秒），防限流 |
 | `SMTP_HOST` / `SMTP_PORT` | | `smtp.qq.com` / `587` | SMTP 服务器 |
 | `SMTP_USER` / `SMTP_PASS` | | — | 账号 / 授权码（非登录密码） |
 | `FROM_EMAIL` | | =`SMTP_USER` | 发件人 |
@@ -132,6 +132,8 @@ python main.py --quiet                  # 关闭过程日志
 | `AGENT_VERBOSE` | | `true` | 是否打印过程日志 |
 | `HTTP_TIMEOUT` | | `20` | 数据接口超时（秒） |
 | `REPORT_DIR` / `OUTPUT_DIR` | | `reports` / `outputs` | 产物目录 |
+| `PAPER_INITIAL_CASH` | | `100000` | 模拟盘初始资金（元） |
+| `PAPER_DIR` | | `paper` | 模拟盘状态与报表目录 |
 
 ---
 
@@ -189,6 +191,22 @@ python main.py --quiet                  # 关闭过程日志
 
 > 说明：同一预测可能在多份报告中出现，台账按「原预测日期 + 预测文本」去重，避免重复计数。
 
+### 6.4 模拟交易（`paper.py`）
+
+| 工具 | 作用 |
+|---|---|
+| `get_quote` | 取个股/ETF 最新价（收盘价） |
+| `paper_portfolio` | 查看现金、持仓、浮动盈亏、总资产 |
+| `paper_buy(code, amount, reason)` | 按收盘价买入（100 股整数倍） |
+| `paper_sell(code, ratio, reason)` | 按比例卖出（`1.0`=清仓） |
+| `paper_report` | 生成交易报表并写入 `paper/交易_{date}.md` |
+
+- 初始资金 **10 万元**；可买个股与 ETF；**不含手续费/印花税**（纯模拟）。
+- 状态持久化在 `paper/portfolio.json`（账户）+ `paper/trades.json`（流水）。
+- **并发安全**：所有「读-改-写」用全局锁串行化（CrewAI 可能并发调用工具，避免状态被覆盖）。
+- 交易纪律（写在任务提示中）：持仓 2–4 只、单票 ≤30%、总仓位 ≤80%、浮亏 7–8% 或破位止损、理由 ≤20 字。
+- 该任务**只输出表格、不发邮件**。
+
 ---
 
 ## 7. 关键设计
@@ -216,6 +234,10 @@ reports/
     ├── sz399006_YYYYMMDD.png       # 创业板指
     └── sh000300_YYYYMMDD.png       # 沪深300
 outputs/                            # 各阶段中间产物
+paper/                              # 模拟交易（git 忽略）
+├── portfolio.json                  # 账户状态（现金/持仓）
+├── trades.json                     # 交易流水
+└── 交易_YYYY-MM-DD.md              # 当日交易报表（表格）
 ```
 
 ---

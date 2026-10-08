@@ -4,6 +4,7 @@
 # 运行产物
 reports/
 outputs/
+paper/
 
 # Python
 __pycache__/

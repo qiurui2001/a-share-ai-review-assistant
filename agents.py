@@ -3,10 +3,10 @@
 agents.py —— 每日盘后复盘 Multi-Agent 团队
 ============================================
 
-四个角色，串行协作（researcher → fact_checker → review_validator → analyzer → writer）：
+六个角色，串行协作：
 
     研究员(信息检索) → 核查员(事实核验/防幻觉) → 复盘校验员(往期预测验证/RAG)
-    → 分析师(盘面分析) → 撰稿人(交付)
+    → 分析师(盘面分析) → 模拟交易员(10w模拟盘/收盘交易) → 撰稿人(交付)
 
 设计要点
 --------
@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 from rag import retrieve_past_predictions
 from ledger import get_prediction_stats
+from paper import get_quote, paper_buy, paper_portfolio, paper_report, paper_sell
 from tools import (
     fetch_webpage,
     generate_index_charts,
@@ -240,7 +241,31 @@ analyzer = Agent(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Agent 5：撰稿人（专业投资顾问）
+# Agent 5：模拟交易员（10 万模拟盘，收盘交易）
+# ══════════════════════════════════════════════════════════════════════════════
+paper_trader = Agent(
+    role="模拟交易员",
+    goal=(
+        "管理 10 万元模拟账户，依据当日盘面分析与往期校准结论，在收盘价上对个股/ETF 做买卖，"
+        "控制回撤、纪律优先，并输出规范的交易报表。"
+    ),
+    backstory=(
+        "你是一名纪律极严的模拟盘交易员，只做自己能解释清楚的交易。你不追高、不臆造标的、"
+        "不满仓赌方向：单笔有明确逻辑，单票有仓位上限，亏了有止损线。"
+        "你只依据分析结论与工具返回的真实价格下单，理由一句话说清；没有把握时就空仓等待。"
+        "你清楚这是模拟盘训练，目标是长期稳健、可复盘，而不是一把梭。"
+    ),
+    tools=[get_quote, paper_portfolio, paper_buy, paper_sell, paper_report],
+    llm=llm,
+    verbose=AGENT_VERBOSE,
+    allow_delegation=False,
+    max_iter=18,
+    respect_context_window=True,
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Agent 6：撰稿人（专业投资顾问）
 # ══════════════════════════════════════════════════════════════════════════════
 writer = Agent(
     role="专业投资顾问",
@@ -262,4 +287,4 @@ writer = Agent(
 )
 
 
-AGENTS = [researcher, fact_checker, review_validator, analyzer, writer]
+AGENTS = [researcher, fact_checker, review_validator, analyzer, paper_trader, writer]
