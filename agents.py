@@ -3,9 +3,10 @@
 agents.py —— 每日盘后复盘 Multi-Agent 团队
 ============================================
 
-四个角色，串行协作（researcher → fact_checker → analyzer → writer）：
+四个角色，串行协作（researcher → fact_checker → review_validator → analyzer → writer）：
 
-    研究员(信息检索) → 核查员(事实核验/防幻觉) → 分析师(盘面分析) → 撰稿人(交付)
+    研究员(信息检索) → 核查员(事实核验/防幻觉) → 复盘校验员(往期预测验证/RAG)
+    → 分析师(盘面分析) → 撰稿人(交付)
 
 设计要点
 --------
@@ -22,6 +23,7 @@ import time
 from crewai import Agent, LLM
 from dotenv import load_dotenv
 
+from rag import retrieve_past_predictions
 from tools import (
     fetch_webpage,
     generate_index_charts,
@@ -46,7 +48,7 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.8") or "0.8")
-LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8192") or "8192")
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "16384") or "16384")
 AGENT_VERBOSE = os.environ.get("AGENT_VERBOSE", "true").lower() in ("1", "true", "yes")
 
 # CrewAI 原生支持 deepseek 提供方（OpenAI 兼容），用 "deepseek/" 前缀即可，
@@ -177,7 +179,37 @@ fact_checker = Agent(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Agent 3：分析师（盘面分析师）
+# Agent 3：复盘校验员（往期预测验证 / RAG）
+# ══════════════════════════════════════════════════════════════════════════════
+review_validator = Agent(
+    role="历史复盘校验员",
+    goal=(
+        "用 retrieve_past_predictions 检索往期复盘报告里『对未来的预测』，"
+        "再取今日（最近交易日）的真实走势逐条比对：过去的点位/情景/概率/操作策略"
+        "哪些命中、哪些偏离、为什么，输出一份可追溯的《往期预测验证》，为本次预判做校准。"
+    ),
+    backstory=(
+        "你是一名极度重视『自我校准』的复盘教练。你相信预测可以错，但错了必须承认、必须归因。"
+        "你从不替过去的自己找借口：说对了就复述当时依据，说错了就点明证伪信号、计算偏差幅度。"
+        "你只认两样东西——往期报告白纸黑字写下的预测，以及行情工具返回的真实数字；"
+        "对不上就写「偏离」，取不到就写「无法验证」，绝不脑补。"
+    ),
+    tools=[
+        retrieve_past_predictions,
+        get_market_overview,
+        get_index_kline,
+        get_limit_pool,
+    ],
+    llm=llm_precise,  # 低温，求客观
+    verbose=AGENT_VERBOSE,
+    allow_delegation=False,
+    max_iter=15,
+    respect_context_window=True,
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Agent 4：分析师（盘面分析师）
 # ══════════════════════════════════════════════════════════════════════════════
 analyzer = Agent(
     role="盘面分析师",
@@ -206,7 +238,7 @@ analyzer = Agent(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Agent 4：撰稿人（专业投资顾问）
+# Agent 5：撰稿人（专业投资顾问）
 # ══════════════════════════════════════════════════════════════════════════════
 writer = Agent(
     role="专业投资顾问",
@@ -228,4 +260,4 @@ writer = Agent(
 )
 
 
-AGENTS = [researcher, fact_checker, analyzer, writer]
+AGENTS = [researcher, fact_checker, review_validator, analyzer, writer]

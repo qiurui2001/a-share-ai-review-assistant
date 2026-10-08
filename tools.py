@@ -452,6 +452,66 @@ def generate_index_charts(codes: str = "", days: int = 60) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 # 工具 3：板块涨跌与主力资金
 # ══════════════════════════════════════════════════════════════════════════════
+# 进程内缓存：同一 board 在 TTL 内只真正请求一次（每 board 4 个请求），
+# 避免多 Agent（研究员/核查/分析/撰稿）反复调用把 push2delay 打到限流。
+_SECTOR_CACHE: dict = {}
+SECTOR_CACHE_TTL = int(os.environ.get("SECTOR_CACHE_TTL", "600") or "600")
+
+
+def _sector_lists(board: str) -> dict:
+    """获取并缓存某 board 的四榜原始列表（每榜 10 条），TTL 内复用。"""
+    now = time.time()
+    hit = _SECTOR_CACHE.get(board)
+    if hit and now - hit[0] < SECTOR_CACHE_TTL:
+        return hit[1]
+
+    fs = "m:90+t:3" if board == "concept" else "m:90+t:2"
+    fields = "f12,f14,f3,f62,f104,f105,f128,f136,f140"
+    data = {
+        "gainers": _em_clist(fs, fields, pz=10, fid="f3", po=1),
+        "losers": _em_clist(fs, fields, pz=10, fid="f3", po=0),
+        "inflow": _em_clist(fs, fields, pz=10, fid="f62", po=1),
+        "outflow": _em_clist(fs, fields, pz=10, fid="f62", po=0),
+    }
+    if any(data.values()):
+        _SECTOR_CACHE[board] = (now, data)
+    return data
+
+
+def _sina_sector(board: str) -> dict:
+    """备用源：新浪板块涨跌幅排行（无主力资金/涨跌家数）。返回 {gainers, losers}。"""
+    url = ("https://vip.stock.finance.sina.com.cn/q/view/newFLJK.php?param=class"
+           if board == "concept"
+           else "https://vip.stock.finance.sina.com.cn/q/view/newSinaHy.php")
+    resp = _http_get(url, retries=2, encoding="gbk")
+    if resp is None:
+        return {}
+    m = re.search(r"=\s*(\{.*\})", resp.text, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        obj = json.loads(m.group(1))
+    except Exception:  # noqa: BLE001
+        return {}
+    rows = []
+    for v in obj.values():
+        parts = str(v).split(",")
+        if len(parts) < 13:
+            continue
+        rows.append({
+            "name": parts[1],
+            "change": _to_float(parts[5]),
+            "lead_name": parts[12],
+            "lead_change": _to_float(parts[9]),
+        })
+    if not rows:
+        return {}
+    return {
+        "gainers": sorted(rows, key=lambda r: (r["change"] if r["change"] is not None else -1e9), reverse=True),
+        "losers": sorted(rows, key=lambda r: (r["change"] if r["change"] is not None else 1e9)),
+    }
+
+
 @tool
 def get_sector_flow(board: str = "industry", top_n: int = 10) -> str:
     """获取行业板块或概念板块的涨跌幅排行与主力资金净流入排行，用于判断当日市场主线。
@@ -461,16 +521,38 @@ def get_sector_flow(board: str = "industry", top_n: int = 10) -> str:
         top_n: 每个榜单返回的条数，默认 10。
     """
     top_n = max(3, min(int(top_n), 20))
-    fs = "m:90+t:3" if board == "concept" else "m:90+t:2"
     board_name = "概念板块" if board == "concept" else "行业板块"
-    fields = "f12,f14,f3,f62,f104,f105,f128,f136,f140"
 
-    # 分别按涨跌幅、主力净额正/倒序各取一页，避免「先取全量再排序」被接口截断
-    gainers = _em_clist(fs, fields, pz=top_n, fid="f3", po=1)
-    losers = _em_clist(fs, fields, pz=top_n, fid="f3", po=0)
-    inflow = _em_clist(fs, fields, pz=top_n, fid="f62", po=1)
-    outflow = _em_clist(fs, fields, pz=top_n, fid="f62", po=0)
+    # 每个 board 只取一次（缓存），各 Agent 共享，避免限流
+    data = _sector_lists(board)
+    gainers = data["gainers"][:top_n]
+    losers = data["losers"][:top_n]
+    inflow = data["inflow"][:top_n]
+    outflow = data["outflow"][:top_n]
     if not any((gainers, losers, inflow, outflow)):
+        # 东方财富限流时，降级到新浪板块涨跌幅（无主力资金，如实标注）
+        sina = _sina_sector(board)
+        if sina.get("gainers"):
+            lines = [
+                f"# {board_name}涨跌幅排行（新浪备用源，主力资金不可用）",
+                "",
+                "> 东方财富资金接口限流，以下为**新浪板块降级数据**：仅有涨跌幅与领涨股，"
+                "**无主力净额、无涨跌家数**（以 — 表示），请据此谨慎使用。",
+                "",
+            ]
+            for title, group in (("涨幅榜", sina["gainers"][:top_n]),
+                                 ("跌幅榜", sina["losers"][:top_n])):
+                lines.append(f"## {title}")
+                lines.append("")
+                lines.append("| 板块 | 涨跌幅 | 领涨股 |")
+                lines.append("|---|---|---|")
+                for r in group:
+                    lines.append(
+                        f"| {r['name']} | {_pct(r['change'])} "
+                        f"| {r['lead_name']}({_pct(r['lead_change'])}) |"
+                    )
+                lines.append("")
+            return "\n".join(lines)
         return f"【数据获取失败】未能获取{board_name}数据，接口可能临时限流，请重试。"
 
     def table(group: list[dict]) -> list[str]:

@@ -78,7 +78,7 @@ def main() -> int:
     print("=" * 60)
     print(f"  每日盘后复盘 Agent 启动")
     print(f"  复盘日期：{today}")
-    print(f"  团队：研究员 → 核查员 → 分析师 → 撰稿人")
+    print(f"  团队：研究员 → 核查员 → 复盘校验员 → 分析师 → 撰稿人")
     print(f"  收件邮箱：{os.environ.get('REPORT_TO_EMAIL', '（未配置，将只存档）')}")
     print("=" * 60)
 
