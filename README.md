@@ -199,13 +199,14 @@ python main.py --quiet                  # 关闭过程日志
 | `paper_portfolio` | 查看现金、持仓、浮动盈亏、总资产 |
 | `paper_buy(code, amount, reason)` | 按收盘价买入（100 股整数倍） |
 | `paper_sell(code, ratio, reason)` | 按比例卖出（`1.0`=清仓） |
-| `paper_report` | 生成交易报表并写入 `paper/交易_{date}.md` |
+| `paper_report` | 生成交易报表并写入 `paper/交易_{date}.md`（含账户汇总 / **净资产曲线** / 逐日收益） |
 
 - 初始资金 **10 万元**；可买个股与 ETF；**不含手续费/印花税**（纯模拟）。
-- 状态持久化在 `paper/portfolio.json`（账户）+ `paper/trades.json`（流水）。
+- 状态持久化在 `paper/portfolio.json`（账户）+ `paper/trades.json`（流水）+ `paper/equity.json`（每日净值）。
+- **每日净值曲线**：每次生成报表时 upsert 当日净值快照，输出 `净资产曲线_{date}.png` 与逐日收益表（当日/累计收益率、仓位）。
 - **并发安全**：所有「读-改-写」用全局锁串行化（CrewAI 可能并发调用工具，避免状态被覆盖）。
 - 交易纪律（写在任务提示中）：持仓 2–4 只、单票 ≤30%、总仓位 ≤80%、浮亏 7–8% 或破位止损、理由 ≤20 字。
-- 该任务**只输出表格、不发邮件**。
+- 该任务**只输出表格与曲线、不发邮件**。
 
 ---
 
@@ -237,7 +238,9 @@ outputs/                            # 各阶段中间产物
 paper/                              # 模拟交易（git 忽略）
 ├── portfolio.json                  # 账户状态（现金/持仓）
 ├── trades.json                     # 交易流水
-└── 交易_YYYY-MM-DD.md              # 当日交易报表（表格）
+├── equity.json                     # 每日净值快照（净资产曲线数据源）
+├── 净资产曲线_YYYY-MM-DD.png       # 净资产曲线图
+└── 交易_YYYY-MM-DD.md              # 当日交易报表（表格 + 曲线 + 逐日收益）
 ```
 
 ---

@@ -31,6 +31,7 @@ PAPER_DIR = Path(os.environ.get("PAPER_DIR", "paper"))
 INITIAL_CASH = float(os.environ.get("PAPER_INITIAL_CASH", "100000") or "100000")
 STATE_FILE = PAPER_DIR / "portfolio.json"
 TRADES_FILE = PAPER_DIR / "trades.json"
+EQUITY_FILE = PAPER_DIR / "equity.json"
 
 _LOCK = threading.RLock()
 
@@ -69,6 +70,81 @@ def _load_trades() -> list[dict]:
 def _save_trades(trades: list[dict]) -> None:
     PAPER_DIR.mkdir(parents=True, exist_ok=True)
     TRADES_FILE.write_text(json.dumps(trades, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_equity() -> list[dict]:
+    if EQUITY_FILE.exists():
+        try:
+            return json.loads(EQUITY_FILE.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return []
+    return []
+
+
+def _save_equity(records: list[dict]) -> None:
+    PAPER_DIR.mkdir(parents=True, exist_ok=True)
+    EQUITY_FILE.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _record_equity(total: float, cash: float, market_value: float) -> list[dict]:
+    """按日期 upsert 当日净值快照，返回按日期升序的净值序列。"""
+    records = _load_equity()
+    today = _today()
+    row = {"date": today, "total": round(total, 2),
+           "cash": round(cash, 2), "market_value": round(market_value, 2)}
+    for i, r in enumerate(records):
+        if r.get("date") == today:
+            records[i] = row
+            break
+    else:
+        records.append(row)
+    records.sort(key=lambda r: r["date"])
+    _save_equity(records)
+    return records
+
+
+def _equity_chart(records: list[dict]):
+    """画净资产曲线 PNG，返回文件路径（失败返回 None）。"""
+    if len(records) < 2:
+        return None
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
+        plt.rcParams["axes.unicode_minus"] = False
+
+        dates = [r["date"][5:] for r in records]  # MM-DD
+        totals = [r["total"] for r in records]
+        x = list(range(len(records)))
+        last = totals[-1]
+        ret = (last / INITIAL_CASH - 1) * 100
+
+        fig, ax = plt.subplots(figsize=(8.5, 3.6))
+        ax.axhline(INITIAL_CASH, color="#9e9e9e", linestyle="--", linewidth=1, label=f"初始 {INITIAL_CASH:,.0f}")
+        color = "#d32f2f" if ret >= 0 else "#2e7d32"
+        ax.plot(x, totals, color=color, linewidth=1.8, marker="o", markersize=3, label="总资产")
+        ax.fill_between(x, totals, INITIAL_CASH, color=color, alpha=0.08)
+        ax.annotate(f"{last:,.0f}（{ret:+.2f}%）", xy=(x[-1], last),
+                    xytext=(-8, 10), textcoords="offset points",
+                    fontsize=10, color=color, fontweight="bold", ha="right")
+        ax.set_title("模拟盘净资产曲线", fontsize=13, fontweight="bold")
+        ax.set_ylabel("总资产（元）", fontsize=10)
+        ax.grid(True, linestyle="--", alpha=0.25)
+        ax.legend(loc="upper left", fontsize=9)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        step = max(1, len(dates) // 10)
+        ax.set_xticks(x[::step])
+        ax.set_xticklabels(dates[::step], fontsize=8)
+        fig.tight_layout()
+        path = PAPER_DIR / f"净资产曲线_{_today()}.png"
+        fig.savefig(path, dpi=110, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        return path
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _quotes(codes: list[str]) -> dict:
@@ -222,17 +298,25 @@ def _report() -> str:
     state = _load()
     trades = _load_trades()
     rows, mv, total = _valuation(state)
+    cash = state.get("cash", 0.0)
     realized = state.get("realized_pnl", 0.0)
     float_pnl = sum(r["pnl"] for r in rows)
+
+    # 记录当日净值快照
+    equity = _record_equity(total, cash, mv)
+    cum_ret = (total / INITIAL_CASH - 1) * 100
+    day_ret = 0.0
+    if len(equity) >= 2 and equity[-2]["total"]:
+        day_ret = (equity[-1]["total"] / equity[-2]["total"] - 1) * 100
 
     holding_codes = set(state.get("holdings", {}).keys())
     lines = [
         f"# 模拟交易报表 | {_today()}（收盘价成交）",
         "",
-        f"> 初始资金 **{INITIAL_CASH:,.0f}** 元 ｜ 现金 **{state.get('cash', 0):,.2f}** 元 ｜ "
-        f"持仓市值 **{mv:,.2f}** 元 ｜ 总资产 **{total:,.2f}** 元 ｜ "
-        f"**总收益率 {(total / INITIAL_CASH - 1) * 100:+.2f}%**",
-        f"> 已实现盈亏 **{realized:+,.2f}** 元 ｜ 浮动盈亏 **{float_pnl:+,.2f}** 元",
+        f"> 初始资金 **{INITIAL_CASH:,.0f}** 元 ｜ 现金 **{cash:,.2f}** 元 ｜ "
+        f"持仓市值 **{mv:,.2f}** 元 ｜ 总资产 **{total:,.2f}** 元",
+        f"> 当日收益率 **{day_ret:+.2f}%** ｜ 累计收益率 **{cum_ret:+.2f}%** ｜ "
+        f"已实现盈亏 **{realized:+,.2f}** 元 ｜ 浮动盈亏 **{float_pnl:+,.2f}** 元",
         "",
         "## 一、交易流水",
         "",
@@ -262,6 +346,38 @@ def _report() -> str:
             )
     else:
         lines.append("当前空仓。")
+
+    cash_pct = f"{cash / total * 100:.1f}%" if total else "—"
+    mv_pct = f"{mv / total * 100:.1f}%" if total else "—"
+    lines += [
+        "", "## 三、账户汇总", "",
+        "| 项目 | 金额（元） | 占比 |",
+        "|---|---|---|",
+        f"| 初始资金 | {INITIAL_CASH:,.2f} | 100.0% |",
+        f"| 现金 | {cash:,.2f} | {cash_pct} |",
+        f"| 持仓市值 | {mv:,.2f} | {mv_pct} |",
+        f"| **总资产** | **{total:,.2f}** | **100.0%** |",
+        f"| 累计已实现盈亏 | {realized:+,.2f} | — |",
+        f"| 浮动盈亏 | {float_pnl:+,.2f} | — |",
+        f"| **当日收益率** | **{day_ret:+.2f}%** | — |",
+        f"| **累计收益率** | **{cum_ret:+.2f}%** | — |",
+    ]
+
+    lines += ["", "## 四、净资产曲线与逐日收益", ""]
+    chart = _equity_chart(equity)
+    if chart:
+        lines += [f"![模拟盘净资产曲线]({chart.resolve().as_posix()})", ""]
+    else:
+        lines += ["> 暂无足够数据绘制曲线（需至少 2 个交易日的净值快照）。", ""]
+    lines += ["| 日期 | 总资产 | 当日收益率 | 累计收益率 | 仓位% |", "|---|---|---|---|---|"]
+    prev_total = None
+    for r in equity:
+        dr = 0.0 if not prev_total else (r["total"] / prev_total - 1) * 100
+        cr = (r["total"] / INITIAL_CASH - 1) * 100
+        posw = r["market_value"] / r["total"] * 100 if r["total"] else 0.0
+        lines.append(f"| {r['date']} | {r['total']:,.2f} | {dr:+.2f}% | {cr:+.2f}% | {posw:.1f}% |")
+        prev_total = r["total"]
+    lines += ["", f"> 净值快照数：{len(equity)} 个交易日；曲线文件：`净资产曲线_{_today()}.png`。"]
 
     md = "\n".join(lines)
     PAPER_DIR.mkdir(parents=True, exist_ok=True)
