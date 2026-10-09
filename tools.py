@@ -86,7 +86,6 @@ GLOBAL_CODES = {
     "道琼斯": "usDJI",
     "纳斯达克": "usIXIC",
     "标普500": "usINX",
-    "美元指数": "usDXY",
 }
 
 
@@ -94,12 +93,13 @@ GLOBAL_CODES = {
 # 通用 HTTP / 格式化工具
 # ──────────────────────────────────────────────────────────────────────────────
 def _http_get(url: str, params: Optional[dict] = None, retries: int = 3,
-              timeout: int = HTTP_TIMEOUT, encoding: Optional[str] = None):
+              timeout: int = HTTP_TIMEOUT, encoding: Optional[str] = None,
+              headers: Optional[dict] = None):
     """带重试的 GET，失败返回 None。"""
     last_err = "unknown"
     for attempt in range(retries):
         try:
-            resp = SESSION.get(url, params=params, timeout=timeout)
+            resp = SESSION.get(url, params=params, timeout=timeout, headers=headers)
             if resp.status_code == 200:
                 if encoding:
                     resp.encoding = encoding
@@ -750,18 +750,59 @@ def get_market_news(count: int = 20) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 # 工具 7：国际市场
 # ══════════════════════════════════════════════════════════════════════════════
+# 新浪兜底代码：腾讯没有美元指数（usDXY 无效），用新浪 DINIW；顺带补原油/黄金
+SINA_GLOBAL_CODES = [
+    ("美元指数", "DINIW", "fx"),
+    ("布伦特原油", "hf_OIL", "hf"),
+    ("纽约黄金", "hf_GC", "hf"),
+]
+
+
+def _sina_globals() -> list[str]:
+    """新浪国际行情兜底：美元指数 / 布伦特原油 / 纽约黄金。"""
+    url = "https://hq.sinajs.cn/list=" + ",".join(c for _, c, _ in SINA_GLOBAL_CODES)
+    resp = _http_get(url, retries=2, encoding="gbk",
+                     headers={"Referer": "https://finance.sina.com.cn/"})
+    if resp is None:
+        return []
+    data: dict[str, list[str]] = {}
+    for line in resp.text.splitlines():
+        m = re.match(r'var hq_str_(\w+)="(.*)";', line.strip())
+        if m:
+            data[m.group(1)] = m.group(2).split(",")
+    out: list[str] = []
+    for name, code, kind in SINA_GLOBAL_CODES:
+        f = data.get(code)
+        if not f or len(f) < 8:
+            continue
+        if kind == "fx":       # time,price,...,prev,...  → price=f[1], prev=f[3]
+            price, prev = _to_float(f[1]), _to_float(f[3])
+        else:                  # hf: price=f[0], ..., prev=f[7]
+            price, prev = _to_float(f[0]), _to_float(f[7])
+        if price is None:
+            continue
+        pct = (price / prev - 1) * 100 if (prev and price) else None
+        pct_text = f"（{pct:+.2f}%）" if pct is not None else ""
+        out.append(f"{name}(新浪): {price}{pct_text}")
+    return out
+
+
 @tool
 def get_global_markets() -> str:
-    """获取隔夜国际主要市场行情（恒生、道琼斯、纳斯达克、标普500、美元指数），用于研判外部环境。"""
+    """获取隔夜国际主要市场行情（恒生、道琼斯、纳斯达克、标普500、美元指数、原油、黄金），用于研判外部环境。"""
     quotes = _tencent_quotes(list(GLOBAL_CODES.values()))
-    if not quotes:
-        return "【数据获取失败】未能获取国际市场行情。"
     lines = ["# 国际主要市场", ""]
     for name, code in GLOBAL_CODES.items():
         fields = quotes.get(code)
         if fields:
             lines.append("- " + _quote_line(name, fields, show_amount=False))
-    return "\n".join(lines) if len(lines) > 2 else "暂未获取到国际市场数据。"
+    # 腾讯缺失项（美元指数等）用新浪兜底
+    extra = _sina_globals()
+    if extra:
+        lines.append("")
+        lines.append("（新浪补充）")
+        lines += [f"- {x}" for x in extra]
+    return "\n".join(lines) if len(lines) > 2 else "【数据获取失败】未能获取国际市场行情。"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

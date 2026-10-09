@@ -156,10 +156,15 @@ python main.py --quiet                  # 关闭过程日志
 
 ### 6.1 数据源与稳健性
 
-- **腾讯行情**（`qt.gtimg.cn` / `web.ifzq.gtimg.cn`）：指数/个股快照与 K 线，稳定、不限流。
-- **东方财富延时行情**（`push2delay.eastmoney.com`）：盘后复盘足够，比主站 `push2` 稳定，规避限流。
-- **东方财富涨跌停**（`push2ex.eastmoney.com`）、**快讯**（`np-listapi.eastmoney.com`）。
+- **腾讯行情**（`qt.gtimg.cn` / `web.ifzq.gtimg.cn`）：A股指数/个股/ETF 快照与 K 线，稳定、不限流。
+- **新浪财经**（`hq.sinajs.cn`）：**国际市场兜底**——美元指数（`DINIW`）、布伦特原油（`hf_OIL`）、纽约黄金（`hf_GC`）；
+  板块涨跌幅**备用源**（`newSinaHy.php` / `newFLJK.php`）。
+- **东方财富涨跌停**（`push2ex.eastmoney.com`）、**快讯**（`np-listapi.eastmoney.com`）：稳定。
+- **东方财富延时行情**（`push2delay.eastmoney.com`）：板块资金、涨跌家数走其 `clist/get`。
+- ⚠️ **已知限制**：东财 `clist/get` 对**高频访问的 IP 会 WAF 拦截**（表现为 TCP `RemoteDisconnected`，换主机/参数/Cookie 均无效）。
+  应对：① 板块加**进程内缓存**（`SECTOR_CACHE_TTL`）；② 板块限流时**自动降级到新浪`（仅涨跌幅+领涨股，无主力资金）；③ 涨跌家数暂无双源，缺失时**如实标注、不估算**。
 - 所有接口均带**重试**；失败返回可读提示，便于 Agent 降级处理。
+- 提示：`get_market_overview` 已返回全部 8 大指数收盘；报告中个别指数「近5日量能」缺失，是因为该字段由 `get_index_kline` 单独计算，属**采集范围**问题，非接口故障。
 
 ### 6.2 邮件渲染
 
