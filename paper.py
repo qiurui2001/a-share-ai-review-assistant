@@ -126,6 +126,11 @@ def _equity_chart(records: list[dict]):
         color = "#d32f2f" if ret >= 0 else "#2e7d32"
         ax.plot(x, totals, color=color, linewidth=1.8, marker="o", markersize=3, label="总资产")
         ax.fill_between(x, totals, INITIAL_CASH, color=color, alpha=0.08)
+        # 按数据区间缩放 y 轴，避免小涨小跌被画成陡峭大波动
+        lo = min(totals + [INITIAL_CASH])
+        hi = max(totals + [INITIAL_CASH])
+        pad = max((hi - lo) * 0.3, INITIAL_CASH * 0.004)
+        ax.set_ylim(lo - pad, hi + pad)
         ax.annotate(f"{last:,.0f}（{ret:+.2f}%）", xy=(x[-1], last),
                     xytext=(-8, 10), textcoords="offset points",
                     fontsize=10, color=color, fontweight="bold", ha="right")
