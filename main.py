@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-main.py —— 每日盘后复盘 Agent 入口
+main.py —— A股AI投资复盘助手 · 入口
 ====================================
 
 编排 researcher → analyzer → writer 三个 Agent 串行协作，一键产出复盘报告并邮件交付。
@@ -28,7 +28,7 @@ load_dotenv()
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="每日盘后复盘 Multi-Agent")
+    parser = argparse.ArgumentParser(description="A股AI投资复盘助手 · Multi-Agent")
     parser.add_argument("--date", default="", help="复盘日期，格式 YYYY-MM-DD，默认今天")
     parser.add_argument("--to", default="", help="收件邮箱，覆盖 REPORT_TO_EMAIL")
     parser.add_argument("--quiet", action="store_true", help="关闭详细过程日志")
@@ -76,7 +76,7 @@ def main() -> int:
     crew = _build_crew()
 
     print("=" * 60)
-    print(f"  每日盘后复盘 Agent 启动")
+    print(f"  A股AI投资复盘助手 启动")
     print(f"  复盘日期：{today}")
     print(f"  团队：研究员 → 核查员 → 复盘校验员 → 分析师 → 模拟交易员 → 撰稿人")
     print(f"  收件邮箱：{os.environ.get('REPORT_TO_EMAIL', '（未配置，将只存档）')}")

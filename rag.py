@@ -10,7 +10,7 @@ rag.py —— 往期复盘检索层（轻量 RAG）
 
 检索对象
 --------
-`reports/每日复盘_YYYY-MM-DD.md`（历史每日复盘报告，按 Markdown 标题切成 section 作为最小检索单元）。
+`reports/A股复盘_YYYY-MM-DD.md`（历史A股复盘报告，按 Markdown 标题切成 section 作为最小检索单元）。
 
 检索算法（无外部依赖、可离线）
 ------------------------------
@@ -38,7 +38,7 @@ from pathlib import Path
 from crewai.tools import tool
 
 REPORT_DIR = Path(os.environ.get("REPORT_DIR", "reports"))
-REPORT_GLOB = "每日复盘_*.md"
+REPORT_GLOB = "A股复盘_*.md"
 
 # 预测类关键词：命中越多，越可能是「对未来的预测」段落
 PREDICTION_KEYWORDS = [
@@ -175,7 +175,7 @@ def _recency_weight(doc_date: str, ref_date: datetime) -> float:
 @tool
 def retrieve_past_predictions(query: str, top_k: int = 6,
                               days_back: int = 60, exclude_date: str = "") -> str:
-    """检索往期每日复盘报告里「对未来的预测」相关段落，用于与今日实际走势做验证。
+    """检索往期A股复盘报告里「对未来的预测」相关段落，用于与今日实际走势做验证。
 
     Args:
         query: 检索意图，例如「下一交易日及未来1-2周 走势预判 情景 概率 支撑压力 操作策略」。

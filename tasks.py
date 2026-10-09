@@ -184,12 +184,12 @@ paper_trade_task = Task(
 # ══════════════════════════════════════════════════════════════════════════════
 writer_task = Task(
     description=(
-        "把研究院的分析整理、润色成一份完整的 {today} 每日复盘报告（正文即最终交付物，"
+        "把研究院的分析整理、润色成一份完整的 {today} A股复盘报告（正文即最终交付物，"
         "后续会有独立任务负责存档与发送，你这里只需把正文写好）。\n\n"
         "第一步（重要）：调用 generate_index_charts 生成大盘 K 线图（近三个月），"
         "它会返回若干行 Markdown 图片语法。\n\n"
         "报告结构：\n"
-        "# 每日复盘 | {today}\n"
+        "# A股复盘 | {today}\n"
         "## 一、今日大盘\n"
         "  1) 用一个 **Markdown 表格** 列出主要指数：指数 / 收盘 / 涨跌幅 / 近5日量能变化 / 量价定性。"
         "表格必须列数对齐、分隔行与表头列数一致（例如 5 列就写 5 个 |---|）。\n"
@@ -215,7 +215,7 @@ writer_task = Task(
         "- 报告要完整收尾，不要写到一半中断。"
     ),
     expected_output=(
-        "一份完整、可直接发送客户的每日复盘报告 MARKDOWN："
+        "一份完整、可直接发送客户的A股复盘报告 MARKDOWN："
         "含规范的指数表格与指数 K 线图、往期预测验证表、六大章节、明确点位/数据、"
         "风险提示与免责声明，且已完整结尾。"
     ),
@@ -229,12 +229,12 @@ writer_task = Task(
 # ══════════════════════════════════════════════════════════════════════════════
 deliver_task = Task(
     description=(
-        "上游任务已经产出完整的《每日复盘 | {today}》报告正文，并已保存为文件 "
+        "上游任务已经产出完整的《A股复盘 | {today}》报告正文，并已保存为文件 "
         "outputs/03_report_{today}.md（见上下文）。你**只做交付**，不要重写报告、"
         "不要在最终回答里粘贴全文：\n\n"
         "1. 调用 save_report_file：source_file = outputs/03_report_{today}.md，"
-        "filename = 每日复盘_{today}.md，content = 上游报告的完整正文。\n"
-        "2. 调用 send_email_report：subject = 每日复盘 | {today} 大盘回顾与操作策略，"
+        "filename = A股复盘_{today}.md，content = 上游报告的完整正文。\n"
+        "2. 调用 send_email_report：subject = A股复盘 | {today} 大盘回顾与操作策略，"
         "**content 留空**，source_file = 上一步 save_report_file 返回的报告路径。\n"
         "3. 最终回答只需一句话，汇报「存档路径 + 邮件发送结果」。\n\n"
         "提示：优先用 source_file 传大段文本，避免把超长正文塞进工具参数导致解析失败。"

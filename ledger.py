@@ -26,7 +26,7 @@ from pathlib import Path
 from crewai.tools import tool
 
 REPORT_DIR = Path(os.environ.get("REPORT_DIR", "reports"))
-REPORT_GLOB = "每日复盘_*.md"
+REPORT_GLOB = "A股复盘_*.md"
 
 _FULL_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 _SHORT_DATE = re.compile(r"\b(\d{2})-(\d{2})\b")

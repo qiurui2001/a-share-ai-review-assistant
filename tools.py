@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-tools.py —— 每日盘后复盘 Agent 的工具集
+tools.py —— A股AI投资复盘助手 · 工具集
 ===========================================
 
 设计原则
@@ -1055,7 +1055,7 @@ def send_email_report(subject: str, content: str = "", to_email: str = "",
     """将复盘报告（Markdown 格式）渲染为 HTML 邮件并发送给客户；若未配置 SMTP 则保存为 HTML 文件。
 
     Args:
-        subject: 邮件主题，例如「每日复盘 | 2026-09-11 大盘回顾与策略」。
+        subject: 邮件主题，例如「A股复盘 | 2026-09-11 大盘回顾与策略」。
         content: 复盘报告正文（Markdown）。若留空则从 source_file 读取。
         to_email: 收件邮箱，留空则使用环境变量 REPORT_TO_EMAIL。
         source_file: 报告文件路径（Markdown），当 content 为空时从此文件读取，
