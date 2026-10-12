@@ -6,6 +6,9 @@ reports/
 outputs/
 paper/
 
+# 收件人名单（含个人邮箱，勿公开）
+recipients.txt
+
 # Python
 __pycache__/
 *.py[cod]

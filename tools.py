@@ -52,6 +52,8 @@ SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "") or SMTP_USER
 REPORT_TO_EMAIL = os.environ.get("REPORT_TO_EMAIL", "")
+CC_EMAILS = os.environ.get("CC_EMAILS", "")
+CC_FILE = Path(os.environ.get("CC_FILE", "recipients.txt"))
 
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "20") or "20")
 
@@ -1049,9 +1051,32 @@ def _render_email_html(title: str, body_html: str) -> str:
 </body></html>"""
 
 
+def _cc_recipients(extra: str = "") -> list[str]:
+    """汇总抄送邮箱：环境变量 CC_EMAILS + 传入的 extra + CC_FILE 文件（每行一个，支持逗号/分号）。去重并校验。"""
+    raw: list[str] = []
+    for src in (CC_EMAILS, os.environ.get("CC_EMAILS", ""), extra):
+        raw += [e.strip() for e in (src or "").replace(";", ",").split(",") if e.strip()]
+    f = CC_FILE if CC_FILE.is_absolute() else (Path.cwd() / CC_FILE)
+    if f.exists():
+        try:
+            for line in f.read_text(encoding="utf-8").splitlines():
+                line = line.split("#", 1)[0].strip()
+                if line:
+                    raw += [e.strip() for e in line.replace(";", ",").split(",") if e.strip()]
+        except Exception:  # noqa: BLE001
+            pass
+    seen: set = set()
+    out: list[str] = []
+    for e in raw:
+        if "@" in e and e not in seen:
+            seen.add(e)
+            out.append(e)
+    return out
+
+
 @tool
 def send_email_report(subject: str, content: str = "", to_email: str = "",
-                      source_file: str = "") -> str:
+                      source_file: str = "", cc: str = "") -> str:
     """将复盘报告（Markdown 格式）渲染为 HTML 邮件并发送给客户；若未配置 SMTP 则保存为 HTML 文件。
 
     Args:
@@ -1060,6 +1085,7 @@ def send_email_report(subject: str, content: str = "", to_email: str = "",
         to_email: 收件邮箱，留空则使用环境变量 REPORT_TO_EMAIL。
         source_file: 报告文件路径（Markdown），当 content 为空时从此文件读取，
                      推荐先 save_report_file 再用它发送，避免超长文本通过参数传递。
+        cc: 抄送邮箱（逗号分隔）；留空时自动采用环境变量 CC_EMAILS 与 recipients.txt 里的列表。
     """
     if not content.strip() and source_file.strip():
         path = Path(source_file.strip())
@@ -1072,6 +1098,7 @@ def send_email_report(subject: str, content: str = "", to_email: str = "",
         return "【发送失败】邮件正文为空（content 与 source_file 至少提供一个）。"
 
     recipient = (to_email or os.environ.get("REPORT_TO_EMAIL", "") or REPORT_TO_EMAIL).strip()
+    cc_list = [e for e in _cc_recipients(cc) if e.lower() != recipient.lower()]
     body_html = _markdown_to_html(content)
     html = _render_email_html(subject, body_html)
 
@@ -1090,6 +1117,8 @@ def send_email_report(subject: str, content: str = "", to_email: str = "",
     msg = MIMEMultipart("alternative")
     msg["From"] = FROM_EMAIL
     msg["To"] = recipient
+    if cc_list:
+        msg["Cc"] = ", ".join(cc_list)
     msg["Subject"] = subject
     msg.attach(MIMEText(content, "plain", "utf-8"))
     msg.attach(MIMEText(html, "html", "utf-8"))
@@ -1104,8 +1133,9 @@ def send_email_report(subject: str, content: str = "", to_email: str = "",
             server.starttls()
             server.ehlo()
         server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(FROM_EMAIL, [recipient], msg.as_string())
-        return f"邮件已发送至 {recipient}。"
+        server.sendmail(FROM_EMAIL, [recipient] + cc_list, msg.as_string())
+        cc_note = f"（抄送：{'、'.join(cc_list)}）" if cc_list else ""
+        return f"邮件已发送至 {recipient}{cc_note}。"
     except Exception as exc:  # noqa: BLE001
         return f"【邮件发送失败】{exc}"
     finally:

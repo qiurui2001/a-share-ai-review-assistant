@@ -132,10 +132,17 @@ def reconcile(path: Path = LEDGER_FILE, builder=None) -> str:
     records = _load_records(path)
     if not records:
         return "【空台账】无可比对记录。"
-    changed = [r["date"] for r in records if _payload_hash(builder(r["date"])) != r.get("payload")]
+    # 源报告存在才可比对；缺失的（如 clone 后 reports/ 未随仓库、或被清理）不计为篡改
+    available = {d for d, _ in ledger._iter_reports()}
+    changed = [r["date"] for r in records
+               if r["date"] in available and _payload_hash(builder(r["date"])) != r.get("payload")]
+    missing = [r["date"] for r in records if r["date"] not in available]
+    parts = []
     if changed:
-        return "⚠️ 以下日期的报告在提交后被改动（与台账不符）：" + "、".join(changed)
-    return "✅ 报告与台账一致，未发现提交后改动。"
+        parts.append("⚠️ 以下日期的报告在提交后被改动（与台账不符）：" + "、".join(changed))
+    if missing:
+        parts.append("ℹ️ 以下日期源报告缺失，无法比对（不影响哈希链自洽）：" + "、".join(missing))
+    return "；".join(parts) if parts else "✅ 报告与台账一致，未发现提交后改动。"
 
 
 def chain_summary(path: Path = LEDGER_FILE) -> str:
