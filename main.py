@@ -3,13 +3,16 @@
 main.py —— A股AI投资复盘助手 · 入口
 ====================================
 
-编排 researcher → analyzer → writer 三个 Agent 串行协作，一键产出复盘报告并邮件交付。
+编排 researcher → fact_checker → review_validator → analyzer → paper_trader → writer
+串行协作，一键产出复盘报告并邮件交付；结束后把当日预测提交进只追加、哈希链台账。
 
 用法：
     python main.py                         # 复盘今天（或最近交易日）
     python main.py --date 2026-09-11       # 指定日期
     python main.py --to client@qq.com      # 指定收件邮箱
     python main.py --quiet                 # 关闭过程日志
+    python main.py --self-review           # 运行《研究月报》（自省），而非每日复盘
+    python main.py --self-review --days 90 # 研究月报覆盖 90 天
 
 环境变量：见 .env.example
 """
@@ -32,6 +35,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--date", default="", help="复盘日期，格式 YYYY-MM-DD，默认今天")
     parser.add_argument("--to", default="", help="收件邮箱，覆盖 REPORT_TO_EMAIL")
     parser.add_argument("--quiet", action="store_true", help="关闭详细过程日志")
+    parser.add_argument("--self-review", action="store_true", help="改为运行《研究月报》(自省)，而非每日复盘")
+    parser.add_argument("--days", type=int, default=30, help="研究月报覆盖天数，默认 30")
     return parser.parse_args()
 
 
@@ -73,6 +78,27 @@ def main() -> int:
         print("=" * 60)
         return 1
 
+    # ── 研究月报（自省）模式 ──
+    if args.self_review:
+        from selfreview import run_self_review
+        print("=" * 60)
+        print("  研究月报（自省）启动")
+        print(f"  基准日：{today}｜覆盖近 {args.days} 天")
+        print("=" * 60)
+        try:
+            result = run_self_review(days_back=args.days, today=today)
+        except KeyboardInterrupt:
+            print("\n[已中断] 用户取消运行。")
+            return 130
+        except Exception as exc:  # noqa: BLE001
+            print(f"\n[运行失败] {exc}")
+            return 1
+        print("\n" + "=" * 60)
+        print("  研究月报完成")
+        print("=" * 60)
+        print(result)
+        return 0
+
     crew = _build_crew()
 
     print("=" * 60)
@@ -95,6 +121,13 @@ def main() -> int:
     print("  复盘完成")
     print("=" * 60)
     print(result)
+
+    # 提交当日预测到只追加、哈希链台账（防篡改；同一日不重复提交）
+    try:
+        from integrity import commit_day
+        print("\n[预测台账] " + commit_day(today))
+    except Exception as exc:  # noqa: BLE001
+        print(f"\n[预测台账] 提交失败（不影响复盘）：{exc}")
 
     usage = getattr(crew, "usage_metrics", None)
     if usage:

@@ -24,7 +24,13 @@ from crewai import Agent, LLM
 from dotenv import load_dotenv
 
 from rag import retrieve_past_predictions
-from ledger import get_prediction_stats
+from ledger import (
+    auto_verify_predictions,
+    get_error_analysis,
+    get_prediction_stats,
+    get_research_track_record,
+)
+from integrity import verify_ledger_integrity
 from paper import get_quote, paper_buy, paper_portfolio, paper_report, paper_sell
 from tools import (
     fetch_webpage,
@@ -186,22 +192,24 @@ fact_checker = Agent(
 review_validator = Agent(
     role="历史复盘校验员",
     goal=(
-        "用 retrieve_past_predictions 检索往期复盘报告里『对未来的预测』，"
-        "再取今日（最近交易日）的真实走势逐条比对：过去的点位/情景/概率/操作策略"
-        "哪些命中、哪些偏离、为什么，输出一份可追溯的《往期预测验证》，为本次预判做校准。"
+        "用 auto_verify_predictions 对往期复盘报告里『对未来的预测』做**确定性自动核验**"
+        "（工具已用真实指数日 K 判好每条的命中/偏离，口径固定、可复现），再结合 "
+        "retrieve_past_predictions 的原文，逐条补充『为什么对/错』的归因，"
+        "并调用 verify_ledger_integrity 确认台账未被回改，输出一份可追溯的《往期预测验证》做校准。"
     ),
     backstory=(
         "你是一名极度重视『自我校准』的复盘教练。你相信预测可以错，但错了必须承认、必须归因。"
-        "你从不替过去的自己找借口：说对了就复述当时依据，说错了就点明证伪信号、计算偏差幅度。"
-        "你只认两样东西——往期报告白纸黑字写下的预测，以及行情工具返回的真实数字；"
-        "对不上就写「偏离」，取不到就写「无法验证」，绝不脑补。"
+        "你的判分**只认工具算出来的客观结果**（点位是否触及、方向是否兑现），绝不替过去的自己"
+        "找台阶、也不把球踢给模型的主观判断；对不上的预测，你要点明证伪信号、计算偏差幅度。"
+        "对不上就写偏离，取不到就写无法验证，绝不脑补。"
     ),
     tools=[
-        retrieve_past_predictions,
+        auto_verify_predictions,
         get_prediction_stats,
+        retrieve_past_predictions,
         get_market_overview,
         get_index_kline,
-        get_limit_pool,
+        verify_ledger_integrity,
     ],
     llm=llm_precise,  # 低温，求客观
     verbose=AGENT_VERBOSE,
@@ -219,18 +227,22 @@ analyzer = Agent(
     goal=(
         "基于研究员收集的原始情报，进行量价分析、板块资金分析、技术形态与支撑压力位判断、"
         "波浪结构定位、消息面与情绪面解读，并给出对次日及未来一段时间的走势预判与应对策略。"
+        "分析前先查看 get_research_track_record（自己的历史战绩），在弱项维度/弱项体制上主动降低表态强度。"
     ),
     backstory=(
         "你是职业的技术分析与盘面结构专家，最擅长把「量、价、时、空」四个维度拼成一张完整的图。"
         "你不迷信单一指标，习惯用多套逻辑交叉验证：量能是否背离、领涨板块是否有持续性、"
-        "指数处在波浪的哪个位置、关键支撑压力在哪里。你敢于给明确观点和概率判断，"
+        "指数处在波浪的哪个位置、关键支撑压力在哪里。你还有一个罕见的习惯：**先复盘自己的命中率**——"
+        "在历史证明自己弱的场景更谨慎、更强调条件与证伪。你敢于给明确观点和概率判断，"
         "但同时会说明「什么情况证伪」，从不模棱两可。你说话像给老板做路演，结论先行、逻辑支撑。"
     ),
     tools=[
+        get_market_overview,
         get_index_kline,
         get_sector_flow,
         get_market_breadth,
         get_limit_pool,
+        get_research_track_record,
     ],
     llm=llm,
     verbose=AGENT_VERBOSE,
