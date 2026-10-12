@@ -48,7 +48,7 @@ load_dotenv()
 # ──────────────────────────────────────────────────────────────────────────────
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
 LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.8") or "0.8")
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "16384") or "16384")
 AGENT_VERBOSE = os.environ.get("AGENT_VERBOSE", "true").lower() in ("1", "true", "yes")
