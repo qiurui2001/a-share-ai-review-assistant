@@ -290,7 +290,8 @@ writer = Agent(
         "你的报告永远遵循「先说结论、再说依据、最后给策略」的结构，重点用加粗突出，风险提示绝不省略。"
         "你重视交付：报告一定会先存档，然后确认邮件发送成功，绝不半途而废。"
     ),
-    tools=[generate_index_charts, get_sector_flow, save_report_file, send_email_report],
+    tools=[get_market_overview, generate_index_charts, get_sector_flow,
+           save_report_file, send_email_report],
     llm=llm,
     verbose=AGENT_VERBOSE,
     allow_delegation=False,
