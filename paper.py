@@ -33,6 +33,11 @@ STATE_FILE = PAPER_DIR / "portfolio.json"
 TRADES_FILE = PAPER_DIR / "trades.json"
 EQUITY_FILE = PAPER_DIR / "equity.json"
 
+# ── 交易纪律（硬约束）──
+PAPER_MAX_POSITION = float(os.environ.get("PAPER_MAX_POSITION", "0.8") or "0.8")
+PAPER_MAX_REBALANCE_PER_WEEK = int(os.environ.get("PAPER_MAX_REBALANCE_PER_WEEK", "2") or "2")
+PAPER_COOLDOWN_DAYS = int(os.environ.get("PAPER_COOLDOWN_DAYS", "3") or "3")
+
 _LOCK = threading.RLock()
 
 
@@ -224,6 +229,38 @@ def _portfolio_text() -> str:
 
 def _buy(code: str, amount: float, reason: str) -> str:
     state = _load()
+    trades = _load_trades()
+    today = datetime.now().date()
+
+    # ── 换手率纪律：每周最多 N 个「调仓日」（同一天多笔算一次）──
+    week_dates = set()
+    for t in trades:
+        try:
+            d = datetime.strptime(t["date"], "%Y-%m-%d").date()
+        except Exception:  # noqa: BLE001
+            continue
+        if d.isocalendar()[:2] == today.isocalendar()[:2]:
+            week_dates.add(d)
+    if today not in week_dates and len(week_dates) >= PAPER_MAX_REBALANCE_PER_WEEK:
+        return (f"【纪律拦截】本周已完成 {len(week_dates)} 个调仓日"
+                f"（上限 {PAPER_MAX_REBALANCE_PER_WEEK}），进入冷静期，本周不再开新仓。")
+
+    # ── 反追涨冷静期：同一标的 X 日内不得重复买入；刚止损的 X 日内不得追回 ──
+    for t in trades:
+        if t.get("code") != code:
+            continue
+        try:
+            d = datetime.strptime(t["date"], "%Y-%m-%d").date()
+        except Exception:  # noqa: BLE001
+            continue
+        gap = (today - d).days
+        if gap < 0 or gap > PAPER_COOLDOWN_DAYS:
+            continue
+        if t.get("action") == "买入":
+            return f"【纪律拦截】{code} 在 {gap} 天内已买入过，禁止追涨加仓（冷静期 {PAPER_COOLDOWN_DAYS} 天）。"
+        if t.get("action") == "卖出" and (t.get("realized_pnl") or 0) < 0:
+            return f"【纪律拦截】{code} 在 {gap} 天内刚止损过，冷静期内不得追回。"
+
     q = _quotes([code])
     if code not in q or q[code][1] is None:
         return f"【失败】未能获取 {code} 行情，放弃买入。"
@@ -235,6 +272,14 @@ def _buy(code: str, amount: float, reason: str) -> str:
         return f"【放弃】可用现金 {cash:,.2f} 元不足以按 {price} 买入 100 股 {name}({code})。"
     shares = lots * 100
     cost = shares * price
+
+    # ── 仓位上限硬拦截（默认 80%）──
+    _, mv_now, total_now = _valuation(state)
+    if total_now:
+        pos_after = (mv_now + cost) / total_now
+        if pos_after > PAPER_MAX_POSITION + 1e-9:
+            return (f"【纪律拦截】买入后总仓位将达 {pos_after * 100:.1f}%，"
+                    f"超过上限 {PAPER_MAX_POSITION * 100:.0f}%，拒绝执行。")
 
     holdings = state.setdefault("holdings", {})
     prev = holdings.get(code)
@@ -248,7 +293,6 @@ def _buy(code: str, amount: float, reason: str) -> str:
 
     _, _, total = _valuation(state)
     pos = holdings[code]["shares"] * price / total * 100 if total else 0.0
-    trades = _load_trades()
     trades.append({
         "date": _today(), "code": code, "name": name, "action": "买入",
         "price": round(price, 3), "shares": shares, "amount": round(cost, 2),
@@ -447,7 +491,46 @@ def paper_report() -> str:
         return _report()
 
 
-PAPER_TOOLS = [get_quote, paper_portfolio, paper_buy, paper_sell, paper_report]
+@tool
+def paper_trade_history(days: int = 14) -> str:
+    """查看最近 N 天的模拟交易流水（调仓/换手纪律自查用）。
+
+    Args:
+        days: 回看天数，默认 14 天。
+    """
+    with _LOCK:
+        trades = _load_trades()
+    today = datetime.now().date()
+    rows = []
+    for t in trades:
+        try:
+            d = datetime.strptime(t["date"], "%Y-%m-%d").date()
+        except Exception:  # noqa: BLE001
+            continue
+        if 0 <= (today - d).days <= days:
+            rows.append(t)
+    if not rows:
+        return f"最近 {days} 天无交易。"
+    rows.sort(key=lambda x: x["date"])
+    lines = [
+        f"# 最近 {days} 天交易（共 {len(rows)} 笔）",
+        "",
+        f"> 纪律：每周最多 {PAPER_MAX_REBALANCE_PER_WEEK} 个调仓日；同一标的 {PAPER_COOLDOWN_DAYS} 天内不得重复买入、"
+        f"止损后 {PAPER_COOLDOWN_DAYS} 天内不得追回；总仓位上限 {PAPER_MAX_POSITION * 100:.0f}%。",
+        "",
+        "| 日期 | 代码 | 名称 | 方向 | 价格 | 金额 | 已实现盈亏 | 理由 |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for t in rows:
+        pnl = "—" if t.get("realized_pnl") is None else f"{t['realized_pnl']:+,.2f}"
+        lines.append(
+            f"| {t['date']} | {t['code']} | {t['name']} | {t['action']} | {t['price']:.3f} "
+            f"| {t['amount']:,.2f} | {pnl} | {t.get('reason', '')} |"
+        )
+    return "\n".join(lines)
+
+
+PAPER_TOOLS = [get_quote, paper_portfolio, paper_buy, paper_sell, paper_report, paper_trade_history]
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ from ledger import (
     get_research_track_record,
 )
 from integrity import verify_ledger_integrity
-from paper import get_quote, paper_buy, paper_portfolio, paper_report, paper_sell
+from paper import get_quote, paper_buy, paper_portfolio, paper_report, paper_sell, paper_trade_history
 from tools import (
     fetch_webpage,
     generate_index_charts,
@@ -267,7 +267,7 @@ paper_trader = Agent(
         "你只依据分析结论与工具返回的真实价格下单，理由一句话说清；没有把握时就空仓等待。"
         "你清楚这是模拟盘训练，目标是长期稳健、可复盘，而不是一把梭。"
     ),
-    tools=[get_quote, paper_portfolio, paper_buy, paper_sell, paper_report],
+    tools=[get_quote, paper_portfolio, paper_buy, paper_sell, paper_report, paper_trade_history],
     llm=llm,
     verbose=AGENT_VERBOSE,
     allow_delegation=False,
