@@ -232,18 +232,21 @@ def _buy(code: str, amount: float, reason: str) -> str:
     trades = _load_trades()
     today = datetime.now().date()
 
-    # ── 换手率纪律：每周最多 N 个「调仓日」（同一天多笔算一次）──
-    week_dates = set()
+    # ── 买入额度：每周最多 N 个「买入日」（同一天多笔买入算一次；卖出不受限）──
+    week_buy_dates = set()
     for t in trades:
+        if t.get("action") != "买入":
+            continue
         try:
             d = datetime.strptime(t["date"], "%Y-%m-%d").date()
         except Exception:  # noqa: BLE001
             continue
         if d.isocalendar()[:2] == today.isocalendar()[:2]:
-            week_dates.add(d)
-    if today not in week_dates and len(week_dates) >= PAPER_MAX_REBALANCE_PER_WEEK:
-        return (f"【纪律拦截】本周已完成 {len(week_dates)} 个调仓日"
-                f"（上限 {PAPER_MAX_REBALANCE_PER_WEEK}），进入冷静期，本周不再开新仓。")
+            week_buy_dates.add(d)
+    if today not in week_buy_dates and len(week_buy_dates) >= PAPER_MAX_REBALANCE_PER_WEEK:
+        return (f"【纪律拦截·仅限买入】本周买入日已达 {len(week_buy_dates)} 个"
+                f"（上限 {PAPER_MAX_REBALANCE_PER_WEEK}），本周不再开新仓；"
+                f"**卖出/减持不受此限，可随时执行**。")
 
     # ── 反追涨冷静期：同一标的 X 日内不得重复买入；刚止损的 X 日内不得追回 ──
     for t in trades:
@@ -257,9 +260,9 @@ def _buy(code: str, amount: float, reason: str) -> str:
         if gap < 0 or gap > PAPER_COOLDOWN_DAYS:
             continue
         if t.get("action") == "买入":
-            return f"【纪律拦截】{code} 在 {gap} 天内已买入过，禁止追涨加仓（冷静期 {PAPER_COOLDOWN_DAYS} 天）。"
+            return f"【纪律拦截·仅限买入】{code} 在 {gap} 天内已买入过，禁止追涨加仓（冷静期 {PAPER_COOLDOWN_DAYS} 天）。"
         if t.get("action") == "卖出" and (t.get("realized_pnl") or 0) < 0:
-            return f"【纪律拦截】{code} 在 {gap} 天内刚止损过，冷静期内不得追回。"
+            return f"【纪律拦截·仅限买入】{code} 在 {gap} 天内刚止损过，冷静期内不得追回。"
 
     q = _quotes([code])
     if code not in q or q[code][1] is None:
@@ -515,8 +518,8 @@ def paper_trade_history(days: int = 14) -> str:
     lines = [
         f"# 最近 {days} 天交易（共 {len(rows)} 笔）",
         "",
-        f"> 纪律：每周最多 {PAPER_MAX_REBALANCE_PER_WEEK} 个调仓日；同一标的 {PAPER_COOLDOWN_DAYS} 天内不得重复买入、"
-        f"止损后 {PAPER_COOLDOWN_DAYS} 天内不得追回；总仓位上限 {PAPER_MAX_POSITION * 100:.0f}%。",
+        f"> 纪律：每周最多 {PAPER_MAX_REBALANCE_PER_WEEK} 个买入日（**卖出/减持不受限**）；同一标的 {PAPER_COOLDOWN_DAYS} 天内不得重复买入、"
+        f"止损后 {PAPER_COOLDOWN_DAYS} 天内不得追回（均只限制买入）；总仓位上限 {PAPER_MAX_POSITION * 100:.0f}%。",
         "",
         "| 日期 | 代码 | 名称 | 方向 | 价格 | 金额 | 已实现盈亏 | 理由 |",
         "|---|---|---|---|---|---|---|---|",
