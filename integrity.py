@@ -75,13 +75,32 @@ def _load_records(path: Path = LEDGER_FILE) -> list[dict]:
 # 提交（只追加）
 # ──────────────────────────────────────────────────────────────────────────────
 def commit(path: Path, date: str, items: list[dict], unit: str = "预测") -> str:
-    """把某日的预测条目提交进指定哈希链台账。同一天已提交则跳过（只追加，不覆盖）。"""
+    """把某日预测提交进哈希链台账。
+
+    - 新日期：追加；
+    - 同日重跑且该日恰好是「链尾」：**替换链尾**（保持哈希链自洽，用于修正盘前/盘后重复运行）；
+    - 同日但非链尾：不覆盖（避免篡改历史）。
+    """
     if not items:
         return f"【未记录】{date} 无可提交的{unit}（报告缺失或无『后市预判』）。"
 
-    records = _load_records(path)
-    if any(r.get("date") == date for r in records):
-        return f"【已存在】{date} 的{unit}已提交过，跳过（只追加，不覆盖）。"
+    raw_lines: list[str] = []
+    if path.exists():
+        raw_lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    records: list[dict] = []
+    for ln in raw_lines:
+        try:
+            records.append(json.loads(ln))
+        except Exception:  # noqa: BLE001
+            pass
+
+    replace_tip = bool(records and records[-1].get("date") == date)
+    if not replace_tip and any(r.get("date") == date for r in records):
+        return f"【已存在】{date} 的{unit}已提交过，且不是链尾，跳过（不覆盖历史）。"
+
+    if replace_tip:
+        raw_lines = raw_lines[: len(records) - 1]
+        records = records[:-1]
 
     prev = records[-1]["hash"] if records else _GENESIS
     payload = _payload_hash(items)
@@ -90,10 +109,11 @@ def commit(path: Path, date: str, items: list[dict], unit: str = "预测") -> st
         "date": date, "prev": prev, "payload": payload, "hash": chash,
         "ts": datetime.now().isoformat(timespec="seconds"), "n": len(items), "items": items,
     }
+    raw_lines.append(json.dumps(record, ensure_ascii=False))
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    return f"已提交 {date}：{len(items)} 条{unit}，链哈希 {chash[:16]}…"
+    path.write_text("\n".join(raw_lines) + "\n", encoding="utf-8")
+    action = "已更新(同日重跑替换链尾)" if replace_tip else "已提交"
+    return f"{action} {date}：{len(items)} 条{unit}，链哈希 {chash[:16]}…"
 
 
 def commit_day(date: str) -> str:

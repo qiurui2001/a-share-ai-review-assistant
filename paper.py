@@ -32,6 +32,7 @@ INITIAL_CASH = float(os.environ.get("PAPER_INITIAL_CASH", "100000") or "100000")
 STATE_FILE = PAPER_DIR / "portfolio.json"
 TRADES_FILE = PAPER_DIR / "trades.json"
 EQUITY_FILE = PAPER_DIR / "equity.json"
+SETTLED_FILE = PAPER_DIR / "settled.json"
 
 # ── 交易纪律（硬约束）──
 PAPER_MAX_POSITION = float(os.environ.get("PAPER_MAX_POSITION", "0.8") or "0.8")
@@ -89,6 +90,31 @@ def _load_equity() -> list[dict]:
 def _save_equity(records: list[dict]) -> None:
     PAPER_DIR.mkdir(parents=True, exist_ok=True)
     EQUITY_FILE.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_settled() -> set:
+    if SETTLED_FILE.exists():
+        try:
+            return set(json.loads(SETTLED_FILE.read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001
+            return set()
+    return set()
+
+
+def _save_settled(dates: set) -> None:
+    PAPER_DIR.mkdir(parents=True, exist_ok=True)
+    SETTLED_FILE.write_text(json.dumps(sorted(dates), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _is_settled(date: str) -> bool:
+    return date in _load_settled()
+
+
+def _mark_settled(date: str) -> None:
+    dates = _load_settled()
+    if date not in dates:
+        dates.add(date)
+        _save_settled(dates)
 
 
 def _record_equity(total: float, cash: float, market_value: float) -> list[dict]:
@@ -228,6 +254,8 @@ def _portfolio_text() -> str:
 
 
 def _buy(code: str, amount: float, reason: str) -> str:
+    if _is_settled(_today()):
+        return "【幂等拦截】今日已结算，不再重复交易（防止同日多次运行造成重复买卖）。"
     state = _load()
     trades = _load_trades()
     today = datetime.now().date()
@@ -308,6 +336,8 @@ def _buy(code: str, amount: float, reason: str) -> str:
 
 
 def _sell(code: str, ratio: float, reason: str) -> str:
+    if _is_settled(_today()):
+        return "【幂等拦截】今日已结算，不再重复交易（防止同日多次运行造成重复买卖）。"
     state = _load()
     holdings = state.get("holdings", {})
     h = holdings.get(code)
@@ -434,6 +464,7 @@ def _report() -> str:
     md = "\n".join(lines)
     PAPER_DIR.mkdir(parents=True, exist_ok=True)
     (PAPER_DIR / f"交易_{_today()}.md").write_text(md, encoding="utf-8")
+    _mark_settled(_today())  # 当日结算标记：同日重跑只读、不再交易
     return md
 
 
